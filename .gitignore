@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+src/training/train/runs/
+src/training/train/mlflow.db
+src/training/train/mlruns/
+datasets/
+*.pt
+*.engine
+*.log
+*.pth
+*.onnx
+*.engine
+.DS_Store
+Thumbs.db
