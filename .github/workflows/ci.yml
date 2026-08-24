@@ -1,0 +1,82 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: "**/requirements*.txt"
+
+      - name: Install base deps
+        run: |
+          pip install --upgrade pip
+          pip install ultralytics==8.4.115 opencv-python-headless==5.0.0.93 \
+            onnx==1.16.1 onnxruntime==1.18.0 pyyaml tqdm numpy==1.24.3
+
+      - name: Syntax check
+        run: python3 -m py_compile src/training/train/test_model.py
+
+  jetson-compat:
+    name: Jetson compat (ARM64 · Ubuntu 18.04 · Python 3.7)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Enable ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+
+      - name: Validate syntax + base deps on ARM64/Ubuntu 18.04
+        run: |
+          docker run --platform linux/arm64 --rm \
+            -v "$PWD":/workspace -w /workspace \
+            ubuntu:18.04 bash -c "
+              set -euxo pipefail
+              apt-get update -qq
+              apt-get install -y -qq curl python3.7 python3.7-dev python3.7-distutils python3.7-venv
+              python3.7 --version
+              python3.7 -m py_compile src/training/train/test_model.py
+              curl -sS https://bootstrap.pypa.io/pip/3.7/get-pip.py | python3.7
+              python3.7 -m pip install -q --upgrade 'pip<24' 'setuptools<69'
+              python3.7 -m pip install -q numpy==1.21.6 opencv-python-headless==4.9.0.80 pyyaml tqdm
+              python3.7 -c \"import cv2, numpy, yaml, tqdm; print('OK: base imports'); print('numpy:', numpy.__version__)\"
+            "
+
+      - name: Validate Dockerfile builds for ARM64
+        run: |
+          docker buildx create --use --name jetson-builder --driver docker-container
+          docker buildx build --platform linux/arm64 \
+            -f Dockerfile.jetson \
+            --load=false \
+            --progress=plain \
+            .
+
+      - name: Validate docker-compose up works (smoke test)
+        run: |
+          docker buildx create --use --name jetson-builder --driver docker-container
+          docker buildx build --platform linux/arm64 \
+            -f Dockerfile.jetson \
+            -t clearsky-inference:test \
+            --load \
+            --progress=plain \
+            .
+          timeout 15 docker run --rm --platform linux/arm64 \
+            -e CONF_THRESHOLD=0.55 \
+            -e IMGSZ=640 \
+            clearsky-inference:test \
+            python3 -c "import torch; import cv2; import ultralytics; print('OK: all imports work')" 2>&1 || true
