@@ -1,38 +1,27 @@
 # ============================================================
 # ClearSky - Inferencia YOLOv8n en Jetson Nano (JetPack 4.6.1)
-# Base: NVIDIA L4T Base r32.6.1 (JetPack 4.6.1)
-# PyTorch instalado desde índice oficial de NVIDIA
+# Base: dustynv/l4t-pytorch para L4T r32.6.1 (JetPack 4.6.1)
+# PyTorch + TensorRT + CUDA ya incluidos en la imagen
 # ============================================================
-FROM nvcr.io/nvidia/l4t-base:r32.6.1
+FROM dustynv/l4t-pytorch:r32.6.1-pth1.10-py3
 
 LABEL maintainer="ClearSky Team"
 LABEL description="ClearSky YOLOv8n inference with TensorRT on Jetson Nano"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    LD_LIBRARY_PATH=/usr/lib/aarch64-linux-gnu:/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
-    PATH=/usr/local/cuda/bin:${PATH}
+    PYTHONDONTWRITEBYTECODE=1
 
-# Instalar dependencias del sistema + Python
-# NOTA: libnvinfer-dev y libnvinfer-plugin-dev NO se instalan aquí.
-# En la Jetson real (JetPack 4.6.1) TensorRT 7.1.3 ya viene preinstalado.
-# En CI (emulación) los paquetes no existen en repos Ubuntu estándar.
+# El base ya trae: Python 3.6, PyTorch 1.10, torchvision, TensorRT 7.1.3, CUDA 10.2, cuDNN
+# Solo instalamos dependencias extra de inferencia
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3 python3-pip python3-dev \
-    libopencv-dev python3-opencv \
     libglib2.0-0 libsm6 libxext6 libxrender-dev libgl1-mesa-glx \
     git wget curl ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# PyTorch 1.13 + torchvision 0.14 para JetPack 4.6 (CUDA 10.2)
+# Dependencias de inferencia (PyTorch y torchvision YA vienen en la imagen base)
 RUN pip3 install --no-cache-dir --upgrade pip setuptools wheel && \
     pip3 install --no-cache-dir \
-    --extra-index-url https://pypi.ngc.nvidia.com \
-    torch==1.13.0 torchvision==0.14.0
-
-# Dependencias de inferencia
-RUN pip3 install --no-cache-dir \
     ultralytics==8.4.115 \
     opencv-python-headless==5.0.0.93 \
     onnx==1.16.1 \
