@@ -1,11 +1,12 @@
 # ============================================================
 # ClearSky - Inferencia YOLOv8n en Jetson Nano (JetPack 4.6)
-# Base: dustynv/l4t-pytorch para L4T r32.6.1 (JetPack 4.6 exacto)
-# IMPORTANTE: El tag DEBE coincidir con el L4T del host (cat /etc/nv_tegra_release).
-# El runtime nvidia monta librerías CUDA/cuDNN/TensorRT del host dentro del contenedor.
-# Si el tag no coincide, habrá mismatches de versiones en runtime.
+# Base: dustynv/l4t-pytorch para L4T r32.7.1 (JetPack 4.6.2)
+# IMPORTANTE: El tag DEBE ser compatible con el L4T del host.
+# Verificar en la Jetson: cat /etc/nv_tegra_release
+# El runtime nvidia monta librerías CUDA/cuDNN/TensorRT del host.
+# JetPack 4.6 (r32.6.1) y 4.6.2 (r32.7.1) comparten base L4T r32.x.
 # ============================================================
-FROM dustynv/l4t-pytorch:r32.6.1-pth1.9-py3
+FROM dustynv/l4t-pytorch:r32.7.1
 
 LABEL maintainer="ClearSky Team"
 LABEL description="ClearSky YOLOv8n inference with TensorRT on Jetson Nano"
@@ -30,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # La imagen base YA incluye: PyTorch, torchvision, TensorRT 7.1.3, CUDA 10.2, cuDNN, OpenCV
 # Dependencias de inferencia Python (versiones compatibles con Python 3.8 + aarch64)
-# - ultralytics: 8.0.196 (última 8.0.x con soporte amplio, compatible con Py 3.8)
+# - ultralytics: 8.0.196 (última 8.0.x compatible con Python 3.8)
 # - numpy: 1.24.3 (última compatible con Python 3.8)
 # - opencv-python-headless: 4.8.1.78 (última con wheel manylinux2014 aarch64)
 # - onnxruntime-gpu: ELIMINADO (no hay wheel aarch64+CUDA en PyPI; usar TensorRT nativo)
