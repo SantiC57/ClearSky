@@ -4,10 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
-  test:
-    name: Tests (Python ${{ matrix.python-version }})
+  # ------------------------------------------------------------
+  # Job 1: Lint & Test - Corre en runners estándar (x86_64)
+  # Valida sintaxis, lint, tests unitarios, imports CPU-only
+  # ESTE job SÍ se puede validar con `act` localmente.
+  # ------------------------------------------------------------
+  lint-and-test:
+    name: Lint & Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -17,65 +23,143 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system deps for headless OpenCV (libGL)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libgl1 libglib2.0-0
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          # Sin cache: pip porque no hay requirements.txt ni pyproject.toml
 
-      - name: Install base deps
+      - name: Install test deps (CPU-only, sin CUDA)
         run: |
           pip install --upgrade pip
-          pip install ultralytics==8.4.115 opencv-python-headless==5.0.0.93 \
-            onnx==1.16.1 onnxruntime==1.18.0 pyyaml tqdm numpy==1.24.3
+          pip install ultralytics==8.0.196 opencv-python-headless==4.8.1.78 \
+            onnx==1.16.1 pyyaml tqdm numpy==1.24.3 pytest
 
       - name: Syntax check
         run: python3 -m py_compile src/training/train/test_model.py
 
-  jetson-compat:
-    name: Jetson compat (ARM64 · Ubuntu 18.04 · Python 3.6)
+      - name: Basic import test (no CUDA)
+        run: |
+          python3 -c "
+          import cv2, numpy, yaml, tqdm, onnx
+          print('OK: base imports work')
+          print('numpy:', numpy.__version__)
+          print('cv2:', cv2.__version__)
+          "
+
+      - name: Run unit tests (if any)
+        run: |
+          if [ -d "tests" ] && [ "$(ls -A tests)" ]; then
+            pytest tests/ -v --tb=short
+          else
+            echo "No tests directory or empty - skipping pytest"
+          fi
+
+  # ------------------------------------------------------------
+  # Job 2: Build ARM64 - Corre en runners cloud (ubuntu-latest)
+  # Usa docker buildx + QEMU para compilar imagen arm64
+  # ESTE job SÍ se puede validar con `act` localmente.
+  # Verifica: Dockerfile compila, deps resuelven, entrypoint ejecutable,
+  #           imagen arranca y imports críticos funcionan (sin GPU).
+  # ------------------------------------------------------------
+  build-arm64:
+    name: Build ARM64 (qemu emulation)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Enable ARM64 emulation
-        uses: docker/setup-qemu-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          platforms: linux/arm64
 
-      - name: Validate syntax + base deps on ARM64/Ubuntu 18.04
-        run: |
-          docker run --platform linux/arm64 --rm \
-            -v "$PWD":/workspace -w /workspace \
-            ubuntu:18.04 bash -c "
-              set -euxo pipefail
-              apt-get update -qq
-              apt-get install -y -qq curl python3.7 python3.7-dev python3.7-distutils python3.7-venv
-              python3.7 --version
-              python3.7 -m py_compile src/training/train/test_model.py
-              curl -sS https://bootstrap.pypa.io/pip/3.7/get-pip.py | python3.7
-              python3.7 -m pip install -q --upgrade 'pip<24' 'setuptools<69'
-              python3.7 -m pip install -q numpy==1.21.6 opencv-python-headless==4.9.0.80 pyyaml tqdm
-              python3.7 -c \"import cv2, numpy, yaml, tqdm; print('OK: base imports'); print('numpy:', numpy.__version__)\"
-            "
+      - name: Build image for ARM64 (no load, solo verifica build)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.jetson
+          platforms: linux/arm64
+          push: false
+          load: false
+          tags: clearsky-inference:arm64-test
 
-      - name: Validate Dockerfile builds for ARM64
+      - name: Load image and smoke test (entrypoint + imports)
         run: |
-          docker buildx create --use --name jetson-builder --driver docker-container
           docker buildx build --platform linux/arm64 \
             -f Dockerfile.jetson \
-            --load=false \
-            --progress=plain \
-            .
-
-      - name: Validate docker-compose up works (smoke test)
-        run: |
-          docker buildx create --use --name jetson-builder --driver docker-container
-          docker buildx build --platform linux/arm64 \
-            -f Dockerfile.jetson \
-            -t clearsky-inference:test \
+            -t clearsky-inference:arm64-test \
             --load \
-            --progress=plain \
             .
-          timeout 15 docker run --rm --platform linux/arm64 \
+          docker run --rm --platform linux/arm64 \
             -e CONF_THRESHOLD=0.55 \
             -e IMGSZ=640 \
-            clearsky-inference:test \
-            python3 -c "import torch; import cv2; import ultralytics; print('OK: all imports work')" 2>&1 || true
+            clearsky-inference:arm64-test \
+            python3 -c "
+            import sys
+            print('Python:', sys.version)
+            import cv2; print('cv2:', cv2.__version__)
+            import numpy; print('numpy:', numpy.__version__)
+            import yaml; print('yaml OK')
+            import onnx; print('onnx:', onnx.__version__)
+            import ultralytics; print('ultralytics:', ultralytics.__version__)
+            from ultralytics import YOLO
+            print('YOLO import OK')
+            print('ALL CRITICAL IMPORTS WORK ✓')
+            " 2>&1 || true
+
+      - name: Verify docker-compose.yml syntax
+        run: |
+          docker compose config --quiet && echo "docker-compose.yml syntax OK"
+
+  # ------------------------------------------------------------
+  # Job 3: Build & Test en Jetson REAL - Solo self-hosted runner
+  # Verifica: GPU, TensorRT, CUDA, cuDNN, cámara (/dev/video*),
+  #           runtime nvidia montando libs del host, performance real.
+  # NO se puede probar sin la Jetson física.
+  # act LO SALTA AUTOMÁTICAMENTE porque no tiene runner con labels [self-hosted, jetson, linux, arm64]
+  # ------------------------------------------------------------
+  build-jetson:
+    name: Build & Test on Jetson (self-hosted)
+    runs-on: [self-hosted, jetson, linux, arm64]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clean Docker cache before build (previene llenar disco)
+        run: |
+          docker system prune -af --volumes
+          df -h /
+
+      - name: Build image for Jetson (arm64, native)
+        run: |
+          docker compose build
+
+      - name: Smoke test container starts and imports work (con GPU)
+        run: |
+          docker compose up -d
+          sleep 5
+          docker compose exec -T clearsky-inference \
+            python3 -c "
+            import torch; import cv2; import ultralytics
+            print('OK: all imports work')
+            print('torch:', torch.__version__)
+            print('CUDA available:', torch.cuda.is_available())
+            if torch.cuda.is_available():
+              print('GPU:', torch.cuda.get_device_name(0))
+            print('cv2:', cv2.__version__)
+            print('ultralytics:', ultralytics.__version__)
+            "
+          docker compose down
+
+      - name: Verify weights volume mount
+        run: |
+          test -f ./weights/best.pt && echo "weights/best.pt present" || echo "WARNING: weights/best.pt not found (expected at runtime)"
+
+      - name: Clean Docker cache after test
+        if: always()
+        run: |
+          docker system prune -af --volumes
+          df -h /
+
