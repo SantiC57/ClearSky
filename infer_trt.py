@@ -9,7 +9,11 @@ Requisitos en Jetson (JetPack 4.6.1):
 - OpenCV 4.1.1 con CUDA (ya instalado: import cv2)
 
 Uso:
-    python3 infer_trt.py --engine weights/best.engine --camera 0 --conf 0.55 --imgsz 640
+    # Cámara USB local:
+    python3 infer_trt.py --engine weights/best.engine --source 0 --conf 0.55
+
+    # IP Webcam (celular) - misma red WiFi:
+    python3 infer_trt.py --engine weights/best.engine --source "http://192.168.1.8:8080/video" --conf 0.55
 """
 
 import argparse
@@ -212,8 +216,8 @@ def draw_detections(frame: np.ndarray, detections: list) -> np.ndarray:
     return annotated
 
 
-def run_inference(engine_path: str, camera_idx: int, conf_thresh: float, imgsz: int):
-    """Loop principal de inferencia con cámara."""
+def run_inference(engine_path: str, source: str, conf_thresh: float, imgsz: int):
+    """Loop principal de inferencia con cámara o stream HTTP (IP Webcam)."""
     logger = trt.Logger(trt.Logger.WARNING)
 
     print(f"[ClearSky] Cargando engine: {engine_path}")
@@ -221,18 +225,24 @@ def run_inference(engine_path: str, camera_idx: int, conf_thresh: float, imgsz: 
     context = engine.create_execution_context()
     buffers = allocate_buffers(engine, context)
 
-    cap = cv2.VideoCapture(camera_idx)
-    # Cámara USB - forzar MJPG para mejor rendimiento
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    cap.set(cv2.CAP_PROP_FPS, 30)
+    # Soporta índice de cámara (int) o URL de stream HTTP (IP Webcam)
+    if source.startswith("http"):
+        cap = cv2.VideoCapture(source)
+        print(f"[ClearSky] Conectando a stream: {source}")
+    else:
+        camera_idx = int(source)
+        cap = cv2.VideoCapture(camera_idx)
+        # Cámara USB - forzar MJPG para mejor rendimiento
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        cap.set(cv2.CAP_PROP_FPS, 30)
+        print(f"[ClearSky] Cámara {camera_idx} abierta.")
 
     if not cap.isOpened():
-        raise RuntimeError(f"No se pudo abrir cámara {camera_idx}")
+        raise RuntimeError(f"No se pudo abrir fuente: {source}")
 
-    print(f"[ClearSky] Cámara {camera_idx} abierta. Motor TensorRT listo.")
-    print("[ClearSky] Presiona 'q' para salir")
+    print("[ClearSky] Motor TensorRT listo. Presiona 'q' para salir")
 
     frame_times = []
 
@@ -298,7 +308,8 @@ def main():
     parser = argparse.ArgumentParser(description="ClearSky - Inferencia TensorRT nativa en Jetson Nano")
     parser.add_argument("--engine", type=str, default="weights/best.engine",
                         help="Ruta al engine TensorRT (.engine)")
-    parser.add_argument("--camera", type=int, default=0, help="Índice de cámara (default 0)")
+    parser.add_argument("--source", type=str, default="0",
+                        help="Fuente de video: índice de cámara (ej: 0) o URL stream HTTP (ej: http://192.168.1.8:8080/video)")
     parser.add_argument("--conf", type=float, default=0.55, help="Umbral confianza (default 0.55)")
     parser.add_argument("--imgsz", type=int, default=640, help="Resolución inferencia (default 640)")
     args = parser.parse_args()
@@ -308,7 +319,7 @@ def main():
         raise FileNotFoundError(f"Engine no encontrado: {engine_path}. "
                                 f"Genera con: trtexec --onnx=weights/best.onnx --saveEngine={engine_path} --fp16 --workspace=1024")
 
-    run_inference(str(engine_path), args.camera, args.conf, args.imgsz)
+    run_inference(str(engine_path), args.source, args.conf, args.imgsz)
 
 
 if __name__ == "__main__":
