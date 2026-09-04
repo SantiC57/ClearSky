@@ -9,7 +9,7 @@ datasets/
 *.engine
 *.log
 *.pth
-*.onnx
+# *.onnx  # allow weights/best.onnx for deployment
 *.engine
 .DS_Store
 Thumbs.db
