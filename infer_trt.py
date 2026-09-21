@@ -231,7 +231,7 @@ def run_inference(engine_path: str, source: str, conf_thresh: float, imgsz: int)
         print(f"[ClearSky] Conectando a stream: {source}")
     else:
         camera_idx = int(source)
-        cap = cv2.VideoCapture(camera_idx)
+        cap = cv2.VideoCapture(camera_idx, cv2.CAP_V4L2)
         # Cámara USB - forzar MJPG para mejor rendimiento
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
