@@ -269,12 +269,12 @@ T01 is the foundation. T02–T08 depend on T01 (config loader). T03 and T04 depe
    - Test `train` calls model.train with correct args (mock YOLO)
 
 **Acceptance criteria**:
-- [ ] `build_train_args` produces correct kwargs dict from config
-- [ ] `setup_mlflow` logs all hyperparameters
-- [ ] `copy_best_model` copies best.pt to models directory
-- [ ] `train` orchestrates the full flow (mocked in tests)
-- [ ] CLI entry point works with `--config` argument
-- [ ] All tests pass
+- [x] `build_train_args` produces correct kwargs dict from config
+- [x] `setup_mlflow` logs all hyperparameters
+- [x] `copy_best_model` copies best.pt to models directory
+- [x] `train` orchestrates the full flow (mocked in tests)
+- [x] CLI entry point works with `--config` argument
+- [x] All tests pass (15/15 passed, 87 total)
 
 **Tests**:
 - `test_build_train_args_merges_config()` — training + augmentation keys present in output
