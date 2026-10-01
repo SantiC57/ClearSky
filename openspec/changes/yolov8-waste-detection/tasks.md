@@ -98,12 +98,12 @@ T01 is the foundation. T02–T08 depend on T01 (config loader). T03 and T04 depe
    - Test `convert_dataset` end-to-end with a mock annotator that returns fixed bboxes
 
 **Acceptance criteria**:
-- [ ] `parse_split_csv` correctly maps one-hot rows to `ImageLabel` records
-- [ ] `write_yolo_label` produces `"{class_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}\n"`
-- [ ] `write_data_yaml` produces valid YAML with absolute path and class names
-- [ ] `quality_gate` raises `QualityGateError` when rejection > 5%
-- [ ] `convert_dataset` with a mock annotator produces valid YOLO directory structure
-- [ ] All tests pass
+- [x] `parse_split_csv` correctly maps one-hot rows to `ImageLabel` records
+- [x] `write_yolo_label` produces `"{class_id} {xc:.6f} {yc:.6f} {w:.6f} {h:.6f}\n"`
+- [x] `write_data_yaml` produces valid YAML with absolute path and class names
+- [x] `quality_gate` raises `QualityGateError` when rejection > 5%
+- [x] `convert_dataset` with a mock annotator produces valid YOLO directory structure
+- [x] All tests pass (24/24 passed, 34 total with T01)
 
 **Tests**:
 - `test_parse_split_csv_valid()` — parses 5-row fixture correctly

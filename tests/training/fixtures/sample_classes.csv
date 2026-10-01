@@ -1,0 +1,6 @@
+filename, cardboard, glass, metal, paper, plastic, trash
+img001.jpg, 1, 0, 0, 0, 0, 0
+img002.jpg, 1, 0, 0, 0, 0, 0
+img003.jpg, 0, 1, 0, 0, 0, 0
+img004.jpg, 0, 0, 1, 0, 0, 0
+img005.jpg, 0, 0, 0, 1, 0, 0
