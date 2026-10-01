@@ -229,12 +229,12 @@ T01 is the foundation. T02–T08 depend on T01 (config loader). T03 and T04 depe
    - Test all validation checks
 
 **Acceptance criteria**:
-- [ ] Validates label format (5 values, correct ranges, valid class_id)
-- [ ] Detects missing label files (image without .txt)
-- [ ] Detects missing image files (label without image)
-- [ ] Computes class distribution
-- [ ] `print_validation_report` outputs readable table
-- [ ] All tests pass
+- [x] Validates label format (5 values, correct ranges, valid class_id)
+- [x] Detects missing label files (image without .txt)
+- [x] Detects missing image files (label without image)
+- [x] Computes class distribution
+- [x] `print_validation_report` outputs readable table
+- [x] All tests pass
 
 **Tests**:
 - `test_validate_valid_dataset()` — all correct → passed=True
