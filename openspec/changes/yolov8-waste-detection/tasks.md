@@ -347,11 +347,11 @@ T01 is the foundation. T02–T08 depend on T01 (config loader). T03 and T04 depe
 
 **Acceptance criteria**:
 - [ ] `evaluate_model` returns correct metrics structure
-- [ ] `print_metrics_table` outputs formatted table with all 6 classes
-- [ ] `plot_per_class_ap` generates PNG file at output_path
-- [ ] Chart has target line at 0.85
-- [ ] `log_metrics_mlflow` logs all metrics
-- [ ] All tests pass
+- [x] `print_metrics_table` outputs formatted table with all 6 classes
+- [x] `plot_per_class_ap` generates PNG file at output_path
+- [x] Chart has target line at 0.85
+- [x] `log_metrics_mlflow` logs all metrics
+- [x] All tests pass (21 tests)
 
 **Tests**:
 - `test_evaluate_model_parses_results()` — mock model.val() → correct metrics dict
