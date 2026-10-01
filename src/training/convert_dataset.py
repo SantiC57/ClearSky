@@ -231,6 +231,162 @@ class ContourAnnotator:
 
 
 # ---------------------------------------------------------------------------
+# YOLOWorldAnnotator — zero-shot detection via YOLO-World (T03)
+# ---------------------------------------------------------------------------
+
+
+class YOLOWorldAnnotator:
+    """Zero-shot annotator using YOLO-World through Ultralytics.
+
+    Loads a YOLO-World model and uses text prompts for zero-shot object
+    detection.  The model is loaded lazily on the first ``annotate`` call
+    to avoid downloading weights when the annotator is only constructed.
+
+    Parameters
+    ----------
+    model_name:
+        Ultralytics model identifier (without ``.pt`` extension).
+    class_names:
+        Text prompts for zero-shot detection.
+    confidence_threshold:
+        Minimum confidence to accept a detection.
+    device:
+        Torch device (``0`` for first GPU, ``"cpu"`` for CPU).
+    """
+
+    def __init__(
+        self,
+        model_name: str = "yolov8s-worldv2",
+        class_names: list[str] | None = None,
+        confidence_threshold: float = 0.30,
+        device: int | str = 0,
+    ) -> None:
+        self.model_name = model_name
+        self.class_names = class_names or [
+            "cardboard", "glass", "metal", "paper", "plastic", "trash",
+        ]
+        self.confidence_threshold = confidence_threshold
+        self.device = device
+        self._model: Any = None  # lazy-loaded
+
+    # -- lifecycle ----------------------------------------------------------
+
+    def load(self) -> None:
+        """Download (if needed) and load the YOLO-World model.
+
+        Raises
+        ------
+        RuntimeError
+            If *ultralytics* is not installed or the model cannot be loaded.
+            The message suggests the ``contour`` fallback.
+        """
+        try:
+            from ultralytics import YOLO
+        except ImportError as exc:
+            raise RuntimeError(
+                "ultralytics is not installed.  "
+                "Install with:  pip install ultralytics"
+            ) from exc
+
+        try:
+            self._model = YOLO(f"{self.model_name}.pt")
+            self._model.set_classes(self.class_names)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to load YOLO-World model '{self.model_name}'.  "
+                "Check your internet connection for model download, or "
+                "set auto_annotate.method: \"contour\" as a fallback."
+            ) from exc
+
+    def set_classes(self, text_prompts: list[str]) -> None:
+        """Update the text prompts for zero-shot detection."""
+        self.class_names = list(text_prompts)
+        if self._model is not None:
+            self._model.set_classes(self.class_names)
+
+    def _ensure_loaded(self) -> None:
+        if self._model is None:
+            self.load()
+
+    # -- inference ----------------------------------------------------------
+
+    def _extract_top_bbox(self, result: Any) -> BoundingBox | None:
+        """Pick the highest-confidence detection from a single *result*.
+
+        Converts from **xyxy** (pixel coordinates) to normalised **xywh**
+        (:class:`BoundingBox`).  Returns ``None`` when no detection passes
+        the confidence threshold.
+        """
+        import numpy as np
+
+        boxes = result.boxes
+        confs = boxes.conf
+
+        if confs is None or len(confs) == 0:
+            return None
+
+        # Boolean mask for detections above threshold
+        mask = np.asarray(confs) >= self.confidence_threshold
+        if not np.any(mask):
+            return None
+
+        # Among the passing detections, pick the one with highest conf
+        filtered_confs = np.asarray(confs)[mask]
+        best_filtered = int(np.argmax(filtered_confs))
+        original_indices = np.where(mask)[0]
+        best_idx = int(original_indices[best_filtered])
+
+        # xyxy → normalised xywh
+        xyxy = np.asarray(boxes.xyxy)[best_idx]
+        x1, y1, x2, y2 = float(xyxy[0]), float(xyxy[1]), float(xyxy[2]), float(xyxy[3])
+
+        img_h, img_w = result.orig_shape
+
+        x_center = ((x1 + x2) / 2.0) / img_w
+        y_center = ((y1 + y2) / 2.0) / img_h
+        width = (x2 - x1) / img_w
+        height = (y2 - y1) / img_h
+
+        return BoundingBox(x_center, y_center, width, height)
+
+    def annotate(self, image_path: Path) -> BoundingBox | None:
+        """Run YOLO-World on a single image and return the top detection."""
+        self._ensure_loaded()
+
+        results = self._model.predict(
+            str(image_path),
+            conf=self.confidence_threshold,
+            imgsz=640,
+            device=self.device,
+            verbose=False,
+        )
+
+        if not results:
+            return None
+        return self._extract_top_bbox(results[0])
+
+    def annotate_batch(
+        self, image_paths: list[Path]
+    ) -> list[BoundingBox | None]:
+        """Batched inference — returns one result per input path."""
+        self._ensure_loaded()
+
+        if not image_paths:
+            return []
+
+        sources = [str(p) for p in image_paths]
+        results = self._model.predict(
+            sources,
+            conf=self.confidence_threshold,
+            imgsz=640,
+            device=self.device,
+            verbose=False,
+        )
+
+        return [self._extract_top_bbox(r) for r in results]
+
+
+# ---------------------------------------------------------------------------
 # CenterCropAnnotator — placeholder for pipeline testing
 # ---------------------------------------------------------------------------
 
@@ -483,11 +639,20 @@ def convert_dataset(config: dict[str, Any]) -> ConversionReport:
         min_area = aa_cfg.get("min_area_ratio", 0.01)
         annotator = ContourAnnotator(min_area_ratio=min_area)
         annotator_name = "contour"
+    elif method == "yolo-world":
+        model_name = aa_cfg.get("model", "yolov8s-worldv2")
+        conf_threshold = aa_cfg.get("confidence_threshold", 0.30)
+        device = aa_cfg.get("device", 0)
+        annotator = YOLOWorldAnnotator(
+            model_name=model_name,
+            class_names=classes,
+            confidence_threshold=conf_threshold,
+            device=device,
+        )
+        annotator_name = f"yolo-world({model_name})"
     else:
-        # Real annotators (yolo-world) are implemented in T03.
-        # For now, fall back to center-crop with a warning.
         logger.warning(
-            "Annotator method '%s' not yet implemented — using CenterCropAnnotator",
+            "Unknown annotator method '%s' — using CenterCropAnnotator",
             method,
         )
         annotator = CenterCropAnnotator()

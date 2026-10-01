@@ -141,12 +141,12 @@ T01 is the foundation. T02–T08 depend on T01 (config loader). T03 and T04 depe
    - Test model load failure raises actionable error
 
 **Acceptance criteria**:
-- [ ] `YOLOWorldAnnotator.annotate()` returns `BoundingBox` with correct normalized coordinates
-- [ ] Top-1 detection is selected (highest confidence)
-- [ ] Returns `None` when no detections above threshold
-- [ ] Batch mode processes multiple images
-- [ ] Model load failure gives actionable error message
-- [ ] All tests pass (mocked, no real model download needed)
+- [x] `YOLOWorldAnnotator.annotate()` returns `BoundingBox` with correct normalized coordinates
+- [x] Top-1 detection is selected (highest confidence)
+- [x] Returns `None` when no detections above threshold
+- [x] Batch mode processes multiple images
+- [x] Model load failure gives actionable error message (mentions "contour" fallback)
+- [x] All tests pass (10/10 mocked, no real model download needed)
 
 **Tests**:
 - `test_yolo_world_annotator_returns_bbox()` — mock predict returns one detection → BoundingBox with correct values

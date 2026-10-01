@@ -12,6 +12,8 @@ import yaml
 import cv2
 import numpy as np
 
+from unittest.mock import patch
+
 from src.training.convert_dataset import (
     BoundingBox,
     CenterCropAnnotator,
@@ -19,6 +21,7 @@ from src.training.convert_dataset import (
     ConversionReport,
     ImageLabel,
     QualityGateError,
+    YOLOWorldAnnotator,
     _convert_split,
     convert_dataset,
     parse_split_csv,
@@ -686,3 +689,219 @@ class TestContourAnnotator:
         # Large rect center ≈ (60/300, 50/200) = (0.2, 0.25)
         assert abs(bbox.x_center - 60 / 300) < 0.05
         assert abs(bbox.y_center - 50 / 200) < 0.05
+
+
+# -----------------------------------------------------------------------
+# YOLOWorldAnnotator (mocked — no real model download)
+# -----------------------------------------------------------------------
+
+
+def _make_mock_result(
+    xyxy: list[list[float]],
+    conf: list[float],
+    cls: list[int],
+    orig_shape: tuple[int, int] = (480, 640),
+) -> MagicMock:
+    """Build a mock YOLO result with the given detections."""
+    result = MagicMock()
+    result.orig_shape = orig_shape
+    result.boxes.xyxy = np.array(xyxy, dtype=np.float32) if xyxy else np.empty((0, 4), dtype=np.float32)
+    result.boxes.conf = np.array(conf, dtype=np.float32) if conf else np.empty(0, dtype=np.float32)
+    result.boxes.cls = np.array(cls, dtype=np.float32) if cls else np.empty(0, dtype=np.float32)
+    return result
+
+
+def _patch_yolo(mock_yolo_cls: MagicMock, results: list[MagicMock]) -> MagicMock:
+    """Configure *mock_yolo_cls* so that ``YOLO(...)`` returns a model whose
+    ``predict`` yields *results* and ``set_classes`` is a no-op."""
+    mock_model = MagicMock()
+    mock_yolo_cls.return_value = mock_model
+    mock_model.predict.return_value = results
+    return mock_model
+
+
+class TestYOLOWorldAnnotator:
+    """Tests for the YOLO-World zero-shot annotator (all mocked)."""
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_annotate_with_mock(self, mock_yolo_cls: MagicMock) -> None:
+        """Mock predict returns one detection → BoundingBox with correct values."""
+        # Image 640×480.  Detection xyxy = (80, 60, 400, 360)
+        # → x_center = (80+400)/2/640 = 0.375
+        # → y_center = (60+360)/2/480 = 0.4375
+        # → width    = (400-80)/640  = 0.5
+        # → height   = (360-60)/480  = 0.625
+        result = _make_mock_result(
+            xyxy=[[80, 60, 400, 360]],
+            conf=[0.85],
+            cls=[0],
+            orig_shape=(480, 640),
+        )
+        _patch_yolo(mock_yolo_cls, [result])
+
+        annotator = YOLOWorldAnnotator(confidence_threshold=0.30)
+        bbox = annotator.annotate(Path("test.jpg"))
+
+        assert bbox is not None
+        assert isinstance(bbox, BoundingBox)
+        assert abs(bbox.x_center - 0.375) < 1e-4
+        assert abs(bbox.y_center - 0.4375) < 1e-4
+        assert abs(bbox.width - 0.5) < 1e-4
+        assert abs(bbox.height - 0.625) < 1e-4
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_no_detection(self, mock_yolo_cls: MagicMock) -> None:
+        """Mock returns empty boxes → returns None."""
+        result = _make_mock_result(xyxy=[], conf=[], cls=[])
+        _patch_yolo(mock_yolo_cls, [result])
+
+        annotator = YOLOWorldAnnotator()
+        assert annotator.annotate(Path("empty.jpg")) is None
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_confidence_filter(self, mock_yolo_cls: MagicMock) -> None:
+        """All detections below threshold → returns None."""
+        result = _make_mock_result(
+            xyxy=[[10, 10, 100, 100], [50, 50, 200, 200]],
+            conf=[0.10, 0.25],  # both below 0.30 threshold
+            cls=[0, 1],
+        )
+        _patch_yolo(mock_yolo_cls, [result])
+
+        annotator = YOLOWorldAnnotator(confidence_threshold=0.30)
+        assert annotator.annotate(Path("low_conf.jpg")) is None
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_takes_highest_confidence(self, mock_yolo_cls: MagicMock) -> None:
+        """Three detections above threshold → highest conf wins."""
+        # Image 640×480
+        # det 0: xyxy=(0,0,320,240)  conf=0.50  → center=(0.25, 0.25), size=(0.5, 0.5)
+        # det 1: xyxy=(320,240,640,480) conf=0.90 → center=(0.75, 0.75), size=(0.5, 0.5)
+        # det 2: xyxy=(160,120,480,360) conf=0.70 → center=(0.5, 0.5), size=(0.5, 0.5)
+        result = _make_mock_result(
+            xyxy=[[0, 0, 320, 240], [320, 240, 640, 480], [160, 120, 480, 360]],
+            conf=[0.50, 0.90, 0.70],
+            cls=[0, 1, 2],
+            orig_shape=(480, 640),
+        )
+        _patch_yolo(mock_yolo_cls, [result])
+
+        annotator = YOLOWorldAnnotator(confidence_threshold=0.30)
+        bbox = annotator.annotate(Path("multi.jpg"))
+
+        assert bbox is not None
+        # det 1 has highest conf (0.90) → center=(0.75, 0.75)
+        assert abs(bbox.x_center - 0.75) < 1e-4
+        assert abs(bbox.y_center - 0.75) < 1e-4
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_xyxy_to_xywh_conversion(self, mock_yolo_cls: MagicMock) -> None:
+        """Verify coordinate conversion from xyxy to normalised xywh."""
+        # Image 1000×500 (w×h → orig_shape=(500, 1000))
+        # xyxy = (100, 50, 600, 400)
+        # → x_center = (100+600)/2/1000 = 0.35
+        # → y_center = (50+400)/2/500   = 0.45
+        # → width    = (600-100)/1000    = 0.5
+        # → height   = (400-50)/500      = 0.7
+        result = _make_mock_result(
+            xyxy=[[100, 50, 600, 400]],
+            conf=[0.80],
+            cls=[0],
+            orig_shape=(500, 1000),
+        )
+        _patch_yolo(mock_yolo_cls, [result])
+
+        annotator = YOLOWorldAnnotator(confidence_threshold=0.30)
+        bbox = annotator.annotate(Path("convert.jpg"))
+
+        assert bbox is not None
+        assert abs(bbox.x_center - 0.35) < 1e-4
+        assert abs(bbox.y_center - 0.45) < 1e-4
+        assert abs(bbox.width - 0.5) < 1e-4
+        assert abs(bbox.height - 0.7) < 1e-4
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_batch_annotate(self, mock_yolo_cls: MagicMock) -> None:
+        """4 images → 4 results (some None)."""
+        r1 = _make_mock_result([[10, 10, 200, 200]], [0.9], [0], (400, 400))
+        r2 = _make_mock_result([], [], [])  # no detection
+        r3 = _make_mock_result([[50, 50, 300, 300]], [0.7], [1], (400, 400))
+        r4 = _make_mock_result([[0, 0, 100, 100]], [0.15], [0], (400, 400))  # below threshold
+
+        mock_model = _patch_yolo(mock_yolo_cls, [r1, r2, r3, r4])
+
+        annotator = YOLOWorldAnnotator(confidence_threshold=0.30)
+        paths = [Path(f"img{i}.jpg") for i in range(4)]
+        results = annotator.annotate_batch(paths)
+
+        assert len(results) == 4
+        assert results[0] is not None  # conf 0.9
+        assert results[1] is None      # empty
+        assert results[2] is not None  # conf 0.7
+        assert results[3] is None      # conf 0.15 < 0.30
+
+        # Verify batch was called once with all sources
+        mock_model.predict.assert_called_once()
+        call_args = mock_model.predict.call_args
+        assert isinstance(call_args[0][0], list)
+        assert len(call_args[0][0]) == 4
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_load_failure(self, mock_yolo_cls: MagicMock) -> None:
+        """YOLO() raises → actionable error mentioning 'contour'."""
+        mock_yolo_cls.side_effect = OSError("model download failed")
+
+        annotator = YOLOWorldAnnotator()
+        with pytest.raises(RuntimeError, match="contour"):
+            annotator.annotate(Path("fail.jpg"))
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_set_classes(self, mock_yolo_cls: MagicMock) -> None:
+        """set_classes is called with correct prompts on load and on update."""
+        mock_model = _patch_yolo(mock_yolo_cls, [])
+
+        prompts = ["bottle", "can", "paper"]
+        annotator = YOLOWorldAnnotator(class_names=prompts)
+        annotator.load()
+
+        mock_model.set_classes.assert_called_with(prompts)
+
+        # Update prompts after load
+        new_prompts = ["cardboard", "glass"]
+        annotator.set_classes(new_prompts)
+        assert annotator.class_names == new_prompts
+        # set_classes should have been called twice total
+        assert mock_model.set_classes.call_count == 2
+        mock_model.set_classes.assert_called_with(new_prompts)
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_lazy_loading(self, mock_yolo_cls: MagicMock) -> None:
+        """Model is NOT loaded until first annotate call."""
+        annotator = YOLOWorldAnnotator()
+        mock_yolo_cls.assert_not_called()
+
+        result = _make_mock_result([[10, 10, 100, 100]], [0.8], [0])
+        _patch_yolo(mock_yolo_cls, [result])
+
+        annotator.annotate(Path("lazy.jpg"))
+        mock_yolo_cls.assert_called_once()
+
+    @patch("ultralytics.YOLO")
+    def test_yolo_world_mixed_conf_filter(self, mock_yolo_cls: MagicMock) -> None:
+        """Two detections: one below, one above threshold → above wins."""
+        result = _make_mock_result(
+            xyxy=[[0, 0, 100, 100], [200, 200, 400, 400]],
+            conf=[0.10, 0.80],
+            cls=[0, 1],
+            orig_shape=(480, 640),
+        )
+        _patch_yolo(mock_yolo_cls, [result])
+
+        annotator = YOLOWorldAnnotator(confidence_threshold=0.30)
+        bbox = annotator.annotate(Path("mixed.jpg"))
+
+        assert bbox is not None
+        # Only det 1 passes (conf=0.80), so it's selected
+        # xyxy=(200,200,400,400) → center=(300/640, 300/480)=(0.46875, 0.625)
+        assert abs(bbox.x_center - 300 / 640) < 1e-4
+        assert abs(bbox.y_center - 300 / 480) < 1e-4
