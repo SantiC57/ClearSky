@@ -128,6 +128,109 @@ class Annotator(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# ContourAnnotator — OpenCV-based fallback (T04)
+# ---------------------------------------------------------------------------
+
+
+class ContourAnnotator:
+    """Fallback annotator that finds the largest object via contour detection.
+
+    Pipeline: load image → grayscale → Gaussian blur → adaptive threshold →
+    morphological cleanup → find external contours → select largest by area →
+    compute bounding rect → normalize to :class:`BoundingBox`.
+
+    Parameters
+    ----------
+    min_area_ratio:
+        Minimum contour area as a fraction of total image area.  Contours
+        smaller than this threshold are ignored.  Defaults to ``0.01`` (1 %).
+    """
+
+    def __init__(self, min_area_ratio: float = 0.01) -> None:
+        self.min_area_ratio = min_area_ratio
+
+    # -- internal helpers ---------------------------------------------------
+
+    @staticmethod
+    def _preprocess(img: "np.ndarray") -> "np.ndarray":
+        """Grayscale → blur → adaptive threshold → morphological cleanup."""
+        import cv2
+
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        thresh = cv2.adaptiveThreshold(
+            blurred,
+            255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV,
+            11,
+            2,
+        )
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+        cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel, iterations=2)
+        cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_OPEN, kernel, iterations=1)
+        return cleaned
+
+    def _find_largest_contour(
+        self, img: "np.ndarray"
+    ) -> "tuple[int, int, int, int] | None":
+        """Return ``(x, y, w, h)`` of the largest valid contour, or *None*."""
+        import cv2
+
+        cleaned = self._preprocess(img)
+        contours, _ = cv2.findContours(
+            cleaned, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        img_area = img.shape[0] * img.shape[1]
+        valid = [
+            c
+            for c in contours
+            if cv2.contourArea(c) / img_area >= self.min_area_ratio
+        ]
+        if not valid:
+            return None
+
+        largest = max(valid, key=cv2.contourArea)
+        return cv2.boundingRect(largest)
+
+    @staticmethod
+    def _rect_to_bbox(
+        rect: "tuple[int, int, int, int]", img_h: int, img_w: int
+    ) -> BoundingBox:
+        """Convert ``(x, y, w, h)`` to a normalized :class:`BoundingBox`."""
+        x, y, w, h = rect
+        x_center = (x + w / 2) / img_w
+        y_center = (y + h / 2) / img_h
+        bbox_w = w / img_w
+        bbox_h = h / img_h
+        return BoundingBox(x_center, y_center, bbox_w, bbox_h)
+
+    # -- public API ---------------------------------------------------------
+
+    def annotate(self, image_path: Path) -> BoundingBox | None:
+        """Return a bounding box for the main object, or ``None``."""
+        import cv2
+
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+
+        rect = self._find_largest_contour(img)
+        if rect is None:
+            return None
+
+        img_h, img_w = img.shape[:2]
+        return self._rect_to_bbox(rect, img_h, img_w)
+
+    def annotate_batch(
+        self, image_paths: list[Path]
+    ) -> list[BoundingBox | None]:
+        """Process images sequentially (OpenCV is already fast per-image)."""
+        return [self.annotate(p) for p in image_paths]
+
+
+# ---------------------------------------------------------------------------
 # CenterCropAnnotator — placeholder for pipeline testing
 # ---------------------------------------------------------------------------
 
@@ -376,8 +479,12 @@ def convert_dataset(config: dict[str, Any]) -> ConversionReport:
     if method == "center-crop":
         annotator: Annotator = CenterCropAnnotator()
         annotator_name = "center-crop"
+    elif method == "contour":
+        min_area = aa_cfg.get("min_area_ratio", 0.01)
+        annotator = ContourAnnotator(min_area_ratio=min_area)
+        annotator_name = "contour"
     else:
-        # Real annotators (yolo-world, contour) are implemented in T03/T04.
+        # Real annotators (yolo-world) are implemented in T03.
         # For now, fall back to center-crop with a warning.
         logger.warning(
             "Annotator method '%s' not yet implemented — using CenterCropAnnotator",

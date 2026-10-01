@@ -186,11 +186,11 @@ T01 is the foundation. T02–T08 depend on T01 (config loader). T03 and T04 depe
    - Verify normalization is correct for known image dimensions
 
 **Acceptance criteria**:
-- [ ] `ContourAnnotator.annotate()` returns `BoundingBox` for images with visible objects
-- [ ] Bounding box matches the largest contour's bounding rect
-- [ ] Coordinates are correctly normalized to [0, 1]
-- [ ] Returns `None` for images with no contours
-- [ ] All tests pass (no model download needed)
+- [x] `ContourAnnotator.annotate()` returns `BoundingBox` for images with visible objects
+- [x] Bounding box matches the largest contour's bounding rect
+- [x] Coordinates are correctly normalized to [0, 1]
+- [x] Returns `None` for images with no contours
+- [x] All tests pass (8/8 contour tests, 42 total — no model download needed)
 
 **Tests**:
 - `test_contour_annotator_white_rect_on_black()` — synthetic image with known rect → bbox matches

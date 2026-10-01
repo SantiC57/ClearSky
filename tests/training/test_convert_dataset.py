@@ -9,9 +9,13 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
+import cv2
+import numpy as np
+
 from src.training.convert_dataset import (
     BoundingBox,
     CenterCropAnnotator,
+    ContourAnnotator,
     ConversionReport,
     ImageLabel,
     QualityGateError,
@@ -548,3 +552,137 @@ class TestCenterCropAnnotator:
 
         assert len(results) == 3
         assert all(b.width == 0.7 for b in results)
+
+
+# -----------------------------------------------------------------------
+# ContourAnnotator
+# -----------------------------------------------------------------------
+
+
+def _save_img(array: np.ndarray, path: Path) -> Path:
+    """Write a numpy BGR array to *path* as PNG and return the path."""
+    cv2.imwrite(str(path), array)
+    return path
+
+
+class TestContourAnnotator:
+    """Tests for the OpenCV contour-based fallback annotator."""
+
+    def test_contour_annotator_simple_object(self, tmp_path: Path) -> None:
+        """Black rectangle on white background → bbox matches the rect."""
+        img = np.ones((200, 300, 3), dtype=np.uint8) * 255
+        # Rect from (50, 30) to (250, 170) → w=200, h=140
+        cv2.rectangle(img, (50, 30), (250, 170), (0, 0, 0), -1)
+        img_path = _save_img(img, tmp_path / "rect.png")
+
+        annotator = ContourAnnotator()
+        bbox = annotator.annotate(img_path)
+
+        assert bbox is not None
+        # Expected center ≈ (150/300, 100/200) = (0.5, 0.5)
+        # Expected size  ≈ (200/300, 140/200) ≈ (0.667, 0.7)
+        assert abs(bbox.x_center - 0.5) < 0.05
+        assert abs(bbox.y_center - 0.5) < 0.05
+        assert abs(bbox.width - 200 / 300) < 0.05
+        assert abs(bbox.height - 140 / 200) < 0.05
+
+    def test_contour_annotator_no_object(self, tmp_path: Path) -> None:
+        """All-black image → no contours → returns None."""
+        img = np.zeros((200, 300, 3), dtype=np.uint8)
+        img_path = _save_img(img, tmp_path / "black.png")
+
+        annotator = ContourAnnotator()
+        assert annotator.annotate(img_path) is None
+
+    def test_contour_annotator_min_area_filter(self, tmp_path: Path) -> None:
+        """Tiny contour below min_area_ratio threshold → None."""
+        img = np.zeros((200, 300, 3), dtype=np.uint8)
+        # 3×3 white square → area ≈ 9 px, img_area = 60000 → ratio ≈ 0.00015
+        cv2.rectangle(img, (100, 100), (103, 103), (255, 255, 255), -1)
+        img_path = _save_img(img, tmp_path / "tiny.png")
+
+        annotator = ContourAnnotator(min_area_ratio=0.01)
+        assert annotator.annotate(img_path) is None
+
+    def test_contour_annotator_returns_bounding_box(
+        self, tmp_path: Path
+    ) -> None:
+        """Return type is BoundingBox with all coordinates in [0, 1]."""
+        img = np.ones((200, 300, 3), dtype=np.uint8) * 255
+        cv2.rectangle(img, (40, 20), (260, 180), (0, 0, 0), -1)
+        img_path = _save_img(img, tmp_path / "obj.png")
+
+        annotator = ContourAnnotator()
+        bbox = annotator.annotate(img_path)
+
+        assert isinstance(bbox, BoundingBox)
+        assert 0.0 <= bbox.x_center <= 1.0
+        assert 0.0 <= bbox.y_center <= 1.0
+        assert 0.0 <= bbox.width <= 1.0
+        assert 0.0 <= bbox.height <= 1.0
+
+    def test_contour_annotator_batch(self, tmp_path: Path) -> None:
+        """Batch processing returns a list of correct length."""
+        # Image with object
+        img_with = np.ones((200, 300, 3), dtype=np.uint8) * 255
+        cv2.rectangle(img_with, (50, 30), (250, 170), (0, 0, 0), -1)
+        p1 = _save_img(img_with, tmp_path / "with_obj.png")
+
+        # Image without object (all black)
+        img_without = np.zeros((200, 300, 3), dtype=np.uint8)
+        p2 = _save_img(img_without, tmp_path / "no_obj.png")
+
+        # Another image with object
+        p3 = _save_img(img_with, tmp_path / "with_obj2.png")
+
+        annotator = ContourAnnotator()
+        results = annotator.annotate_batch([p1, p2, p3])
+
+        assert len(results) == 3
+        assert results[0] is not None
+        assert results[1] is None
+        assert results[2] is not None
+
+    def test_contour_annotator_missing_file(self, tmp_path: Path) -> None:
+        """Nonexistent path → cv2.imread returns None → annotate returns None."""
+        annotator = ContourAnnotator()
+        result = annotator.annotate(tmp_path / "does_not_exist.jpg")
+        assert result is None
+
+    def test_contour_annotator_normalization(self, tmp_path: Path) -> None:
+        """100×200 image with rect at known position → correct normalized values."""
+        # Image: 200 tall × 300 wide (h×w)
+        # Rect from (60, 40) to (240, 160) → x=60, y=40, w=180, h=120
+        img = np.ones((200, 300, 3), dtype=np.uint8) * 255
+        cv2.rectangle(img, (60, 40), (240, 160), (0, 0, 0), -1)
+        img_path = _save_img(img, tmp_path / "norm.png")
+
+        annotator = ContourAnnotator()
+        bbox = annotator.annotate(img_path)
+
+        assert bbox is not None
+        # Expected (approx): x_center ≈ (60+90)/300 = 0.5, y_center ≈ (40+60)/200 = 0.5
+        # width ≈ 180/300 = 0.6, height ≈ 120/200 = 0.6
+        assert abs(bbox.x_center - 0.5) < 0.05
+        assert abs(bbox.y_center - 0.5) < 0.05
+        assert abs(bbox.width - 0.6) < 0.05
+        assert abs(bbox.height - 0.6) < 0.05
+
+    def test_contour_annotator_largest_contour_selected(
+        self, tmp_path: Path
+    ) -> None:
+        """Two rectangles → the larger one is selected."""
+        img = np.ones((200, 300, 3), dtype=np.uint8) * 255
+        # Large rect: (10,10)→(110,90) → 100×80 = 8000 px
+        cv2.rectangle(img, (10, 10), (110, 90), (0, 0, 0), -1)
+        # Small rect: (200,150)→(230,170) → 30×20 = 600 px
+        cv2.rectangle(img, (200, 150), (230, 170), (0, 0, 0), -1)
+        img_path = _save_img(img, tmp_path / "two_rects.png")
+
+        annotator = ContourAnnotator()
+        bbox = annotator.annotate(img_path)
+
+        assert bbox is not None
+        # Large rect center ≈ (60/300, 50/200) = (0.2, 0.25)
+        assert abs(bbox.x_center - 60 / 300) < 0.05
+        assert abs(bbox.y_center - 50 / 200) < 0.05
