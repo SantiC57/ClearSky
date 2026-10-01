@@ -1,0 +1,69 @@
+# --- Paths ---
+project_root: "."                          # Relative to this config file
+source_data: "/home/santiago/Descargas/Waste Classification.v1i.multiclass"
+output_dataset: "datasets/waste-detect"
+models_dir: "models"
+runs_dir: "runs/detect"
+
+# --- Auto-annotation ---
+auto_annotate:
+  method: "yolo-world"                     # "yolo-world" | "contour"
+  model: "yolo-world-l"                    # YOLO-World variant
+  confidence_threshold: 0.30
+  batch_size: 8                            # Inference batch for speed
+  device: 0                                # GPU device
+
+# --- Training ---
+training:
+  model: "yolov8n.pt"
+  task: "detect"
+  epochs: 100
+  batch: 16
+  imgsz: 640
+  optimizer: "AdamW"
+  lr0: 0.001
+  cos_lr: true
+  patience: 20
+  workers: 4
+  cache: "ram"
+  seed: 42
+  project: "${runs_dir}"
+  name: "yolov8n-waste"
+  exist_ok: true
+
+# --- Augmentation ---
+augmentation:
+  hsv_h: 0.015
+  hsv_s: 0.7
+  hsv_v: 0.4
+  degrees: 10.0
+  translate: 0.1
+  scale: 0.5
+  flipud: 0.5
+  fliplr: 0.5
+  mosaic: 1.0
+  mixup: 0.0
+
+# --- Export ---
+export:
+  onnx:
+    imgsz: 640
+    half: true
+    simplify: true
+  tensorrt:
+    imgsz: 640
+    half: true
+
+# --- MLflow ---
+mlflow:
+  tracking_uri: "sqlite:///mlflow.db"
+  experiment_name: "yolov8-waste-detection"
+
+# --- Classes ---
+classes:
+  - cardboard    # 0
+  - glass        # 1
+  - metal        # 2
+  - paper        # 3
+  - plastic      # 4
+  - trash        # 5
