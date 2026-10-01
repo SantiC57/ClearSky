@@ -1,4 +1,11 @@
-"""ClearSky - Entrenamiento YOLOv8 segmentation.
+"""
+DEPRECATED: This script is deprecated.
+Use `src/training/train_detect.py` instead.
+This file will be removed in a future version.
+
+---
+
+ClearSky - Entrenamiento YOLOv8 segmentation.
 
 Script para entrenar un modelo YOLOv8n-seg sobre el dataset ClearSky
 para detectar Cardboard, Organic y plastic con máscaras de segmentación.

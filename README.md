@@ -28,25 +28,37 @@ ClearSkypy/
 
 ## 🚀 Quick Start
 
-### 1. Activar entorno virtual (fish shell)
-```fish
-source .venv/bin/activate.fish
+### 1. Install dependencies
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### 2. Verificar cámara
-```bash
-ls /dev/video*
-v4l2-ctl --list-formats-ext
-```
-La cámara USB (ELFO LARANJA / Sonix 0c49) soporta **MJPG 1920x1080 @ 30 fps**. Para pruebas usamos 1280x720.
+### 2. Training pipeline (v2)
 
-### 3. Entrenar modelo (YOLOv8n detection)
+All commands use `configs/yolov8n-waste.yaml` as the single source of config.
+
 ```bash
-python src/training/train/train_seg.py
+# Convert Roboflow dataset to YOLOv8 format
+python -m src.training.convert_dataset --config configs/yolov8n-waste.yaml
+
+# Validate dataset integrity
+python -m src.training.validate_dataset --config configs/yolov8n-waste.yaml
+
+# Train model
+python -m src.training.train_detect --config configs/yolov8n-waste.yaml
+
+# Export to ONNX / TensorRT
+python -m src.training.export_model --config configs/yolov8n-waste.yaml --format onnx
+
+# Evaluate on test set
+python -m src.training.evaluate --config configs/yolov8n-waste.yaml
 ```
-- Usa `yolov8n.pt` (detección) + dataset `Clear_v1.v2-clear_v1.1_-3-tags.yolov8`.
-- `task="detect"` para evitar error de etiquetas mezcladas.
-- Pesos guardados en `src/training/train/runs/YOLO_Segmentation/yolo8n_detect_clear_sky/weights/best.pt`.
+
+### 3. Legacy scripts
+
+The scripts under `src/training/train/` are deprecated. Use the v2 pipeline above.
 
 ### 4. Probar modelo en vivo con cámara
 ```bash

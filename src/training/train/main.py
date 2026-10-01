@@ -1,3 +1,9 @@
+"""
+DEPRECATED: This script is deprecated.
+Use `src/training/train_detect.py` instead.
+This file will be removed in a future version.
+"""
+
 import os
 import mlflow
 from ultralytics import YOLO, settings

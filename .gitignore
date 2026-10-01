@@ -1,15 +1,25 @@
 __pycache__/
 *.pyc
 .venv/
+
+# Training artifacts
+datasets/
+models/
+runs/
 src/training/train/runs/
+mlflow.db
 src/training/train/mlflow.db
 src/training/train/mlruns/
-datasets/
+mlruns/
+
+# Model weights (keep pretrained base models)
 *.pt
-*.engine
-*.log
-*.pth
+!pretrained/*.pt
 *.onnx
 *.engine
+*.pth
+
+# OS
+*.log
 .DS_Store
 Thumbs.db

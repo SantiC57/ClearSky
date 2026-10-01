@@ -429,10 +429,10 @@ T01 is the foundation. T02–T08 depend on T01 (config loader). T03 and T04 depe
 5. Verify all scripts have `if __name__ == "__main__"` entry points
 
 **Acceptance criteria**:
-- [ ] `requirements.txt` pins all dependencies with version constraints
-- [ ] Old scripts have deprecation comments
-- [ ] `.gitignore` excludes generated artifacts
-- [ ] All new scripts are runnable via `python src/training/<script>.py --config configs/yolov8n-waste.yaml`
+- [x] `requirements.txt` pins all dependencies with version constraints
+- [x] Old scripts have deprecation comments
+- [x] `.gitignore` excludes generated artifacts
+- [x] All new scripts are runnable via `python src/training/<script>.py --config configs/yolov8n-waste.yaml`
 
 **Tests**:
 - No code tests — verification is manual (run each script with `--help`)
