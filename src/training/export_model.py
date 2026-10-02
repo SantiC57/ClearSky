@@ -71,6 +71,19 @@ def export_onnx(model_path: Path, output_dir: Path, config: dict[str, Any]) -> P
     exported = Path(result)
     dest = output_dir / "yolov8n-waste-best.onnx"
 
+    # Ultralytics may save to different locations depending on version.
+    # Check common fallback paths if the reported path doesn't exist.
+    if not exported.exists():
+        fallbacks = [
+            model_path.parent / (model_path.stem + ".onnx"),
+            Path("weights") / "best.onnx",
+            model_path.with_suffix(".onnx"),
+        ]
+        for fb in fallbacks:
+            if fb.exists():
+                exported = fb
+                break
+
     # Overwrite if destination already exists
     if dest.exists():
         dest.unlink()
@@ -139,6 +152,19 @@ def export_tensorrt(
 
     exported = Path(result)
     dest = output_dir / "yolov8n-waste-best.engine"
+
+    # Ultralytics may save to different locations depending on version.
+    # Check common fallback paths if the reported path doesn't exist.
+    if not exported.exists():
+        fallbacks = [
+            model_path.parent / (model_path.stem + ".engine"),
+            Path("weights") / "best.engine",
+            model_path.with_suffix(".engine"),
+        ]
+        for fb in fallbacks:
+            if fb.exists():
+                exported = fb
+                break
 
     if dest.exists():
         dest.unlink()

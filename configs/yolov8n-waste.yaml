@@ -7,7 +7,7 @@ runs_dir: "runs/detect"
 
 # --- Auto-annotation ---
 auto_annotate:
-  method: "yolo-world"                     # "yolo-world" | "contour"
+  method: "contour"                        # "yolo-world" | "contour"
   model: "yolo-world-l"                    # YOLO-World variant
   confidence_threshold: 0.30
   batch_size: 8                            # Inference batch for speed
