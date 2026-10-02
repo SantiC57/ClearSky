@@ -1,0 +1,79 @@
+schema: spec-driven
+
+workflow:
+  execution_mode: interactive
+  artifact_store: openspec
+  delivery_strategy: single-pr-default
+  review_budget_lines: 400
+
+context: |
+  Project: ClearSky.
+  Inspected checkout: /home/santiago/Proyectos/python/ClearSkypy; requested /tmp/ClearSky was absent.
+  Branch: feat/tensorrt-inference at commit 8e37ae0; the working tree had pre-existing changes.
+  Stack: Python YOLOv8/Ultralytics training with MLflow; OpenCV inference; TensorRT/pycuda edge path; Docker/Jetson files.
+  Architecture: training scripts under src/training/train with native and containerized inference paths.
+  Testing: GitHub Actions provides py_compile, import smoke checks, and conditional pytest; no tests directory was detected.
+  Unknowns: dataset provenance/schema, target metrics, reproducibility, hardware availability, and compatibility require confirmation.
+
+strict_tdd: true
+
+testing:
+  strict_tdd: true
+  detected: 2026-09-25
+  runner:
+    command: pytest tests/ -v --tb=short
+    framework: pytest
+    evidence: .github/workflows/ci.yml; no tests/ directory detected
+  test_layers:
+    unit:
+      available: true
+      tool: pytest
+      tests_present: false
+    integration:
+      available: false
+      tool: null
+      tests_present: false
+    e2e:
+      available: false
+      tool: null
+      tests_present: false
+  coverage:
+    available: false
+    command: null
+  quality_tools:
+    linter:
+      available: false
+      command: null
+    type_checker:
+      available: false
+      command: null
+    formatter:
+      available: false
+      command: null
+
+rules:
+  proposal:
+    - Keep the change scoped to YOLOv8 object-detection training; do not conflate it with classification or segmentation.
+    - Include rollback and artifact-lineage plans for changes affecting training outputs or deployment inputs.
+    - Mark repository facts as VERIFIED, TO CONFIRM, or NOT VERIFIED; never invent dataset, model, metric, or hardware facts.
+  specs:
+    - Use Given/When/Then scenarios and RFC 2119 keywords.
+    - Define dataset, evaluation, reproducibility, and deployment acceptance criteria before implementation.
+  design:
+    - Document training, export, inference, and deployment boundaries with rationale.
+    - Record version and hardware assumptions as explicit compatibility questions until verified.
+  tasks:
+    - Group tasks by phase and keep each task completable in one session.
+    - Respect the existing working-tree changes and do not overwrite unrelated application edits.
+  apply:
+    rules:
+      - Follow existing repository patterns and do not add model, dataset, or training artifacts during bootstrap.
+      - Use RED-GREEN-REFACTOR where testable behavior is changed.
+    tdd: true
+    test_command: pytest tests/ -v --tb=short
+  verify:
+    test_command: pytest tests/ -v --tb=short
+    build_command: docker compose config --quiet
+    coverage_threshold: 0
+  archive:
+    - Warn before merging destructive deltas or archiving unverified model results.

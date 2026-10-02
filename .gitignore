@@ -23,3 +23,4 @@ mlruns/
 *.log
 .DS_Store
 Thumbs.db
+mlflow.db
