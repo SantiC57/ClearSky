@@ -28,14 +28,32 @@ import tensorrt as trt
 
 
 # Clases del modelo (mismo orden que entrenamiento)
-CLASS_NAMES = ["Cardboard", "Organic", "Plastic"]
+CLASS_NAMES = [
+    "battery",
+    "can",
+    "cardboard",
+    "drink carton",
+    "glass bottle",
+    "paper",
+    "plastic bag",
+    "plastic bottle",
+    "plastic bottle cap",
+    "pop tab",
+]
 NUM_CLASSES = len(CLASS_NAMES)
 
 # Colores para bounding boxes (BGR)
 CLASS_COLORS = {
-    "Cardboard": (0, 165, 255),   # naranja
-    "Organic": (0, 255, 0),       # verde
-    "Plastic": (255, 0, 0),       # azul
+    "battery": (0, 0, 255),             # rojo
+    "can": (0, 165, 255),               # naranja
+    "cardboard": (42, 42, 165),         # marrón
+    "drink carton": (0, 255, 255),      # amarillo
+    "glass bottle": (255, 255, 0),      # cian
+    "paper": (0, 255, 0),               # verde
+    "plastic bag": (255, 0, 255),       # magenta
+    "plastic bottle": (255, 0, 0),      # azul
+    "plastic bottle cap": (128, 0, 128), # violeta
+    "pop tab": (255, 255, 255),         # blanco
 }
 
 
@@ -50,14 +68,36 @@ def load_engine(engine_path: str, logger: trt.Logger) -> trt.ICudaEngine:
     return engine
 
 
+def _shape_tuple(dims) -> tuple:
+    """Convierte un Dims de TensorRT a una tupla de ints."""
+    return tuple(int(dims[i]) for i in range(len(dims)))
+
+
+def _io_index(engine, name: str) -> int:
+    """Índice del IO `name`, compatible con TensorRT 8.x (bindings) y 10+ (tensors)."""
+    if hasattr(engine, "get_tensor_name"):
+        for i in range(engine.num_io_tensors):
+            if engine.get_tensor_name(i) == name:
+                return i
+        return -1
+    return engine.get_binding_index(name)
+
+
+def _io_shape(engine, name: str) -> tuple:
+    """Shape del IO `name`, compatible con TensorRT 8.x (bindings) y 10+ (tensors)."""
+    if hasattr(engine, "get_tensor_shape"):
+        return _shape_tuple(engine.get_tensor_shape(name))
+    return _shape_tuple(engine.get_binding_shape(engine.get_binding_index(name)))
+
+
 def allocate_buffers(engine: trt.ICudaEngine, context: trt.IExecutionContext):
     """Aloca memoria host/device para inputs y outputs."""
     # Asumimos 1 input (images) y 1 output (output0) - típico YOLOv8 ONNX export
     input_name = "images"
     output_name = "output0"
 
-    input_idx = engine.get_binding_index(input_name)
-    output_idx = engine.get_binding_index(output_name)
+    input_idx = _io_index(engine, input_name)
+    output_idx = _io_index(engine, output_name)
 
     if input_idx == -1 or output_idx == -1:
         # Fallback: listar bindings para debug
@@ -66,10 +106,27 @@ def allocate_buffers(engine: trt.ICudaEngine, context: trt.IExecutionContext):
             print(f"  [{i}] {engine.get_binding_name(i)}: shape={engine.get_binding_shape(i)} dtype={engine.get_binding_dtype(i)}")
         raise RuntimeError(f"Bindings esperados no encontrados: input='{input_name}', output='{output_name}'")
 
-    # Shapes fijos (export ONNX con dynamic=False)
-    input_shape = (1, 3, 640, 640)
-    # Output YOLOv8 detect: (1, 4+num_classes, 8400) -> para 3 clases = (1, 7, 8400)
-    output_shape = (1, 4 + NUM_CLASSES, 8400)
+    # Leer los shapes reales del engine en vez de asumirlos: un engine viejo
+    # (entrenado con otra cantidad de clases) debe fallar acá con un mensaje
+    # claro, no más tarde en execute_v2 con un error de CUDA.
+    input_shape = _io_shape(engine, input_name)
+    output_shape = _io_shape(engine, output_name)
+
+    if input_shape != (1, 3, 640, 640):
+        raise RuntimeError(
+            f"Engine input shape {input_shape} != (1, 3, 640, 640). "
+            f"Regenerá el engine desde weights/best.onnx con imgsz=640."
+        )
+
+    expected_channels = 4 + NUM_CLASSES
+    if len(output_shape) != 3 or output_shape[-2] != expected_channels:
+        raise RuntimeError(
+            f"Engine output shape {output_shape} no coincide con las "
+            f"{NUM_CLASSES} clases de CLASS_NAMES (se esperaba "
+            f"(1, {expected_channels}, N)). Regenerá el engine desde el ONNX "
+            f"correcto: trtexec --onnx=weights/best.onnx "
+            f"--saveEngine=weights/best.engine --fp16 --workspace=1024"
+        )
 
     # Memoria device
     d_input = cuda.mem_alloc(np.empty(input_shape, dtype=np.float32).nbytes)
